@@ -11,8 +11,8 @@ It has the following windows:
 Application is based on Qt5 framework.
 
 ### Screenshots:
-![Main Window](https://github.com/serginarto/duplicate_detector/screenshots/dd1.jpg)
-![Result Window](https://github.com/serginarto/duplicate_detector/screenshots/dd2.jpg)
+![Main Window](https://github.com/serginarto/duplicate_detector/blob/master/screenshots/dd1.jpg)
+![Result Window](https://github.com/serginarto/duplicate_detector/blob/master/screenshots/dd2.jpg)
 
 
 Developed by Sergey Orekhov(orekhovs@yandex.ru)
