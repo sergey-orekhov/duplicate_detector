@@ -25,7 +25,7 @@ public:
      * @param duplicates const QMap<QString, QList<QString>>& the list of duplicates to display
      * @param parent
      */
-    explicit DDResultsWindow(const QMap<QString, QList<QString>>& duplicates, QWidget *parent = 0);
+    explicit DDResultsWindow(const QList<QList<QString>>& duplicates, QWidget *parent = 0);
     ~DDResultsWindow();
 
 public slots:

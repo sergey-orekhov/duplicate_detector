@@ -5,10 +5,25 @@
 #include <QDir>
 #include <QFile>
 #include <QCryptographicHash>
+#include <QSet>
 
 //////////////////////////////////////////////////////////////////
 
 #define MAX_FILE_ZISE 1000000000 // 1Gb
+
+#define MAX_READ_SIZE 32
+
+#define RETURN_IF_CANCELED \
+    if (cancel.load())\
+    {\
+        return;\
+    }\
+
+//////////////////////////////////////////////////////////////////
+
+uint qHash(QFileInfo key) {
+    return qHash(key.absoluteFilePath());
+}
 
 //////////////////////////////////////////////////////////////////
 
@@ -16,7 +31,6 @@ DDProgressWindow::DDProgressWindow(const QStringList &dirs, QWidget *parent) :
     QMainWindow(parent)
     , ui(new Ui::DDProgressWindow)
     , dirList(dirs)
-    , initialListSize(0)
 {
     ui->setupUi(this);
     // run async task to do search
@@ -46,72 +60,153 @@ void DDProgressWindow::closeEvent(QCloseEvent *event)
 
 void DDProgressWindow::Run()
 {
-    // get the list of files from each directory
-    for (int i=0; i<dirList.count(); i++)
-    {
-        const QString& dirName = dirList[i];
+    // discovery the list of unique files
+    QSet<QFileInfo> fileSet;
+    while (!dirList.isEmpty()) {
+        RETURN_IF_CANCELED;
 
-        if (cancel.load())
-        {
-            return;
-        }
+        QDir dir(dirList.takeFirst());
 
         // internal directories
-        QFileInfoList list = QDir(dirName).entryInfoList(QStringList(), QDir::NoDotAndDotDot|QDir::Dirs);
-        for (QFileInfo info: list)
+        auto inDirs = dir.entryInfoList(QStringList(), QDir::NoDotAndDotDot|QDir::Dirs);
+        for (auto inDir: inDirs)
         {
-            dirList.append(info.absoluteFilePath());
+            RETURN_IF_CANCELED;
+            dirList.append(inDir.absoluteFilePath());
         }
 
-        fileList.Append(QDir(dirName).entryInfoList(QStringList(), QDir::Files));
+        // files
+        fileSet.unite(QSet<QFileInfo>::fromList(dir.entryInfoList(QStringList(), QDir::Files)));
     }
 
-    initialListSize = fileList.Count();
-
-    while(!fileList.IsEmpty())
+    // filter files by size
+    QMultiMap<qint64, QFileInfo> fileSizeMap;
+    for (auto file: fileSet)
     {
-        if (cancel.load())
+        RETURN_IF_CANCELED;
+
+        fileSizeMap.insert(file.size(), file);
+    }
+
+    fileSet.clear();
+
+    // remove unique items from fileSizeMap
+    for (auto key: fileSizeMap.uniqueKeys())
+    {
+        RETURN_IF_CANCELED;
+
+        if (fileSizeMap.values(key).size() <= 1)
         {
-            return;
+            fileSizeMap.remove(key);
+        }
+    }
+
+    // filter files by content (some first bytes)
+    QMultiMap<QString, QFileInfo> fileContentMap;
+    uint readBytes = fileSizeMap.firstKey();
+    if (readBytes > MAX_READ_SIZE)
+    {
+        readBytes = MAX_READ_SIZE;
+    }
+
+    for(auto file: fileSizeMap.values())
+    {
+        RETURN_IF_CANCELED;
+
+        if (file.exists() && !file.isDir())
+        {
+            QString absPath = file.absoluteFilePath();
+            QFile f(absPath);
+            if (f.open(QIODevice::ReadOnly))
+            {
+                QString key(f.read(readBytes).toHex());
+                fileContentMap.insert(key, file);
+                f.close();
+            }
+        }
+    }
+
+    fileSizeMap.clear();
+
+    // remove unique items from fileContentMap
+    for (auto key: fileContentMap.uniqueKeys())
+    {
+        RETURN_IF_CANCELED;
+
+        if (fileContentMap.values(key).size() <= 1)
+        {
+            fileContentMap.remove(key);
+        }
+    }
+
+    // filter by hash
+    QMultiMap<QString, QString> fileHashMap;
+    float progress = 0.0f;
+    float progressStep = 100.0f / fileContentMap.size();
+    uint duplicatesCount = 0;
+    for(auto file: fileContentMap.values())
+    {
+        RETURN_IF_CANCELED;
+
+        if (file.exists() && !file.isDir())
+        {
+            QString absPath = file.absoluteFilePath();
+            QFile f(absPath);
+            if (f.size() <= MAX_FILE_ZISE)
+            {
+                if (f.open(QIODevice::ReadOnly))
+                {
+                    // it would be better to use Sha1 instead of Md5, but Md5 is a bit faster.
+                    QCryptographicHash hasher(QCryptographicHash::Md5);
+                    hasher.addData(&f);
+                    QString sHash(hasher.result().toHex());
+                    fileHashMap.insert(sHash, file.absoluteFilePath());
+
+                    uint filesForHash = fileHashMap.values(sHash).size();
+                    if (filesForHash == 2)
+                    {
+                        // at least two new duplicates found
+                        duplicatesCount += 2;
+                    }
+                    else
+                    {
+                        duplicatesCount++;
+                    }
+
+                    f.close();
+                }
+            }
+            else
+            {
+                // too long
+                // just ignore it
+            }
         }
 
-        // process each file
-        this->ProcessFile();
+        QMetaObject::invokeMethod(this, "UpdateUI", Qt::QueuedConnection, Q_ARG(float, progress += progressStep), Q_ARG(uint, duplicatesCount));
+    }
 
-        // update progress
-        QMetaObject::invokeMethod(this, "UpdateUI", Qt::QueuedConnection);
+    fileSizeMap.clear();
+
+    // remove unique items from fileHashMap
+    for (auto key: fileHashMap.uniqueKeys())
+    {
+        RETURN_IF_CANCELED;
+
+        if (fileHashMap.values(key).size() <= 1)
+        {
+            fileHashMap.remove(key);
+        }
+    }
+
+    for (auto key: fileHashMap.uniqueKeys())
+    {
+        RETURN_IF_CANCELED;
+        duplicates.append(fileHashMap.values(key));
     }
 
     // inform done
     emit SearchFinished();
-}
-
-//////////////////////////////////////////////////////////////////
-
-void DDProgressWindow::ProcessFile()
-{
-    QFileInfo fInfo = fileList.TakeFirst();
-    if (fInfo.exists() && !fInfo.isDir())
-    {
-        QString absPath = fInfo.absoluteFilePath();
-        QFile f(absPath);
-        if (f.size() > MAX_FILE_ZISE)
-        {
-            // too long
-            // ignore it
-            return;
-        }
-
-        if (f.open(QIODevice::ReadOnly))
-        {
-            QCryptographicHash hasher(QCryptographicHash::Sha1);
-            hasher.addData(&f);
-            QString sHash(hasher.result().toHex());
-            // put to duplicate list
-            duplicateList.Add(sHash, absPath);
-            f.close();
-        }
-    }
 }
 
 //////////////////////////////////////////////////////////////////
@@ -127,33 +222,17 @@ void DDProgressWindow::Cancel()
 
 //////////////////////////////////////////////////////////////////
 
-void DDProgressWindow::UpdateUI()
+void DDProgressWindow::UpdateUI(float progress, uint count)
 {
-    this->ui->labelCount->setText(QString::number(duplicateList.Count()));
-
-    // update progress file
-    if (fileList.IsEmpty())
-    {
-        this->ui->progressBar->setValue(100);
-    }
-    else
-    {
-        int val = 99;
-        int size = fileList.Count();
-        if (size > 0)
-        {
-            val = (int)(val * (1.0f - ((float)size / (float)initialListSize)));
-        }
-
-        this->ui->progressBar->setValue(val);
-    }
+    this->ui->labelCount->setText(QString::number(count));
+    this->ui->progressBar->setValue(static_cast<int>(progress));
 }
 
 //////////////////////////////////////////////////////////////////
 
-const QMap<QString, QList<QString>>& DDProgressWindow::GetDuplicates()
+const QList<QList<QString> >& DDProgressWindow::GetDuplicates()
 {
-    return duplicateList.GetDuplicates();
+    return duplicates;
 }
 
 //////////////////////////////////////////////////////////////////

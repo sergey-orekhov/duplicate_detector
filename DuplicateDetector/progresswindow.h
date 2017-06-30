@@ -4,11 +4,10 @@
 #include <QMainWindow>
 #include <QStringList>
 #include <QFuture>
+#include <QFileInfo>
+#include <QFileInfoList>
 
 #include <atomic>
-
-#include "syncfilelist.h"
-#include "syncduplicatelist.h"
 
 namespace Ui {
 class DDProgressWindow;
@@ -35,7 +34,7 @@ public:
      * @brief GetDuplicates returns the list of found duplicates
      * @return
      */
-    const QMap<QString, QList<QString>>& GetDuplicates();
+    const QList<QList<QString>>& GetDuplicates();
 
 signals:
     /**
@@ -47,25 +46,21 @@ protected:
     virtual void closeEvent(QCloseEvent *event) override;
 
 private slots:
-    void UpdateUI();
+    void UpdateUI(float progress, uint count);
 
 private:
     void Run();
     void Cancel();
-
-    void ProcessFile();
 
 private:
     Ui::DDProgressWindow* ui;
 
     QStringList dirList;
 
+    QList<QList<QString>> duplicates;
+
     QFuture<void> runningFuture;
     std::atomic_bool cancel;
-
-    int initialListSize;
-    DDSyncFileList fileList;
-    DDSyncDuplicateList duplicateList;
 };
 
 #endif // PROGRESSWINDOW_H
