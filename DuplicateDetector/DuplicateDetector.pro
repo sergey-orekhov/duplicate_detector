@@ -27,16 +27,12 @@ SOURCES += main.cpp\
         mainwindow.cpp \
     aboutwindow.cpp \
     progresswindow.cpp \
-    syncfilelist.cpp \
-    syncduplicatelist.cpp \
     resultswindow.cpp \
     deletefileitem.cpp
 
 HEADERS  += mainwindow.h \
     aboutwindow.h \
     progresswindow.h \
-    syncfilelist.h \
-    syncduplicatelist.h \
     resultswindow.h \
     deletefileitem.h
 

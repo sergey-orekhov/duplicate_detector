@@ -14,7 +14,7 @@
 
 //////////////////////////////////////////////////////////////////
 
-DDResultsWindow::DDResultsWindow(const QMap<QString, QList<QString> >& duplicates, QWidget *parent) :
+DDResultsWindow::DDResultsWindow(const QList<QList<QString> > &duplicates, QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::DDResultsWindow)
 {
@@ -29,9 +29,7 @@ DDResultsWindow::DDResultsWindow(const QMap<QString, QList<QString> >& duplicate
     // for each duplicate item
     // display separated widget with layout
     int count = 0;
-    for (QString key: duplicates.keys()) {
-        QList<QString> files = duplicates[key];
-
+    for (auto files: duplicates) {
         QWidget* keyWidget = new QWidget(scrollWidget);
         QVBoxLayout* KeyLayout = new QVBoxLayout(keyWidget);
         KeyLayout->setMargin(0);
