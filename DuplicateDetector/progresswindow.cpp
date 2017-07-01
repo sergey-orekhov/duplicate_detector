@@ -13,11 +13,17 @@
 
 #define MAX_READ_SIZE 32
 
+#define MAX_THREAD_NUM 4
+
 #define RETURN_IF_CANCELED \
     if (cancel.load())\
     {\
         return;\
     }\
+
+#define DONE \
+    emit SearchFinished(); \
+    return; \
 
 //////////////////////////////////////////////////////////////////
 
@@ -79,6 +85,11 @@ void DDProgressWindow::Run()
         fileSet.unite(QSet<QFileInfo>::fromList(dir.entryInfoList(QStringList(), QDir::Files)));
     }
 
+    if (fileSet.empty())
+    {
+        DONE;
+    }
+
     // filter files by size
     QMultiMap<qint64, QFileInfo> fileSizeMap;
     for (auto file: fileSet)
@@ -99,6 +110,11 @@ void DDProgressWindow::Run()
         {
             fileSizeMap.remove(key);
         }
+    }
+
+    if (fileSizeMap.empty())
+    {
+        DONE;
     }
 
     // filter files by content (some first bytes)
@@ -139,54 +155,34 @@ void DDProgressWindow::Run()
         }
     }
 
-    // filter by hash
-    QMultiMap<QString, QString> fileHashMap;
-    float progress = 0.0f;
-    float progressStep = 100.0f / fileContentMap.size();
-    uint duplicatesCount = 0;
-    for(auto file: fileContentMap.values())
+    if (fileContentMap.empty())
     {
-        RETURN_IF_CANCELED;
-
-        if (file.exists() && !file.isDir())
-        {
-            QString absPath = file.absoluteFilePath();
-            QFile f(absPath);
-            if (f.size() <= MAX_FILE_ZISE)
-            {
-                if (f.open(QIODevice::ReadOnly))
-                {
-                    // it would be better to use Sha1 instead of Md5, but Md5 is a bit faster.
-                    QCryptographicHash hasher(QCryptographicHash::Md5);
-                    hasher.addData(&f);
-                    QString sHash(hasher.result().toHex());
-                    fileHashMap.insert(sHash, file.absoluteFilePath());
-
-                    uint filesForHash = fileHashMap.values(sHash).size();
-                    if (filesForHash == 2)
-                    {
-                        // at least two new duplicates found
-                        duplicatesCount += 2;
-                    }
-                    else
-                    {
-                        duplicatesCount++;
-                    }
-
-                    f.close();
-                }
-            }
-            else
-            {
-                // too long
-                // just ignore it
-            }
-        }
-
-        QMetaObject::invokeMethod(this, "UpdateUI", Qt::QueuedConnection, Q_ARG(float, progress += progressStep), Q_ARG(uint, duplicatesCount));
+        DONE;
     }
 
-    fileSizeMap.clear();
+    fileList = fileContentMap.values();
+    fileContentMap.clear();
+
+    // filter by hash
+    fileHashMap.clear();
+    progress = 0.0f;
+    progressStep = 100.0f / fileList.size();
+    duplicatesCount = 0;
+
+    qDebug() << "start " << QTime::currentTime().toString("ss.mm.zzz");
+    thPool = new QThreadPool();
+    thPool->setMaxThreadCount(MAX_THREAD_NUM);
+    this->setAutoDelete(false);
+    for(int i = 0; i < MAX_THREAD_NUM; i++)
+    {
+        thPool->start(this);
+    }
+
+    thPool->waitForDone();
+    qDebug() << "stop " << QTime::currentTime().toString("ss.mm.zzz");
+    delete thPool;
+
+    fileList.clear();
 
     // remove unique items from fileHashMap
     for (auto key: fileHashMap.uniqueKeys())
@@ -205,8 +201,72 @@ void DDProgressWindow::Run()
         duplicates.append(fileHashMap.values(key));
     }
 
-    // inform done
-    emit SearchFinished();
+    DONE;
+}
+
+//////////////////////////////////////////////////////////////////
+
+void DDProgressWindow::run()
+{
+    hashMutex.lock();
+
+    while (!fileList.empty())
+    {
+        if (cancel.load())
+        {
+            break;
+        }
+
+        auto file = fileList.takeFirst();
+
+        hashMutex.unlock();
+
+        if (file.exists() && !file.isDir())
+        {
+            QString absPath = file.absoluteFilePath();
+            QFile f(absPath);
+            if (f.size() <= MAX_FILE_ZISE)
+            {
+                if (f.open(QIODevice::ReadOnly))
+                {
+                    // it would be better to use Sha1 instead of Md5, but Md5 is a bit faster.
+                    QCryptographicHash hasher(QCryptographicHash::Sha1);
+                    hasher.addData(&f);
+                    QString sHash(hasher.result().toHex());
+
+                    hashMutex.lock();
+
+                    fileHashMap.insert(sHash, file.absoluteFilePath());
+                    uint filesForHash = fileHashMap.values(sHash).size();
+                    if (filesForHash == 2)
+                    {
+                        // at least two new duplicates found
+                        duplicatesCount += 2;
+                    }
+                    else
+                    {
+                        duplicatesCount++;
+                    }
+
+                    hashMutex.unlock();
+
+                    f.close();
+                }
+            }
+            else
+            {
+                // too long
+                // just ignore it
+            }
+        }
+
+        progress = progress + progressStep;
+        QMetaObject::invokeMethod(this, "UpdateUI", Qt::QueuedConnection);
+
+        hashMutex.lock();
+    }
+
+    hashMutex.unlock();
 }
 
 //////////////////////////////////////////////////////////////////
@@ -222,9 +282,9 @@ void DDProgressWindow::Cancel()
 
 //////////////////////////////////////////////////////////////////
 
-void DDProgressWindow::UpdateUI(float progress, uint count)
+void DDProgressWindow::UpdateUI()
 {
-    this->ui->labelCount->setText(QString::number(count));
+    this->ui->labelCount->setText(QString::number(duplicatesCount));
     this->ui->progressBar->setValue(static_cast<int>(progress));
 }
 

@@ -6,6 +6,7 @@
 #include <QFuture>
 #include <QFileInfo>
 #include <QFileInfoList>
+#include <QThreadPool>
 
 #include <atomic>
 
@@ -17,7 +18,7 @@ class DDProgressWindow;
  * @brief The DDProgressWindow class
  * Window displays the search progress
  */
-class DDProgressWindow : public QMainWindow
+class DDProgressWindow : public QMainWindow, public QRunnable
 {
     Q_OBJECT
 
@@ -36,6 +37,11 @@ public:
      */
     const QList<QList<QString>>& GetDuplicates();
 
+    /**
+     * @brief overrides QRunnable::run, used to calculate hash in parallel
+     */
+    virtual void run() override;
+
 signals:
     /**
      * @brief SearchFinished occurs when search is finished
@@ -46,7 +52,7 @@ protected:
     virtual void closeEvent(QCloseEvent *event) override;
 
 private slots:
-    void UpdateUI(float progress, uint count);
+    void UpdateUI();
 
 private:
     void Run();
@@ -61,6 +67,15 @@ private:
 
     QFuture<void> runningFuture;
     std::atomic_bool cancel;
+
+    QList<QFileInfo> fileList;
+    QMultiMap<QString, QString> fileHashMap;
+
+    QThreadPool* thPool;
+    std::atomic<float> progress = 0.0f;
+    float progressStep = 0.0f;
+    std::atomic_uint32_t duplicatesCount = 0;
+    QMutex hashMutex;
 };
 
 #endif // PROGRESSWINDOW_H
