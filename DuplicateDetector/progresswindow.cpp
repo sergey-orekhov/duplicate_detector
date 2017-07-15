@@ -40,7 +40,7 @@ DDProgressWindow::DDProgressWindow(const QStringList &dirs, QWidget *parent) :
 {
     ui->setupUi(this);
     // run async task to do search
-    runningFuture = QtConcurrent::run(this, &DDProgressWindow::Run);
+    runningFuture = QtConcurrent::run(this, &DDProgressWindow::RunSearch);
     cancel = ATOMIC_VAR_INIT(false);
 }
 
@@ -64,7 +64,7 @@ void DDProgressWindow::closeEvent(QCloseEvent *event)
 
 //////////////////////////////////////////////////////////////////
 
-void DDProgressWindow::Run()
+void DDProgressWindow::RunSearch()
 {
     // discovery the list of unique files
     QSet<QFileInfo> fileSet;
@@ -169,7 +169,6 @@ void DDProgressWindow::Run()
     progressStep = 100.0f / fileList.size();
     duplicatesCount = 0;
 
-    qDebug() << "start " << QTime::currentTime().toString("ss.mm.zzz");
     thPool = new QThreadPool();
     thPool->setMaxThreadCount(MAX_THREAD_NUM);
     this->setAutoDelete(false);
@@ -179,7 +178,6 @@ void DDProgressWindow::Run()
     }
 
     thPool->waitForDone();
-    qDebug() << "stop " << QTime::currentTime().toString("ss.mm.zzz");
     delete thPool;
 
     fileList.clear();
@@ -208,8 +206,9 @@ void DDProgressWindow::Run()
 
 void DDProgressWindow::run()
 {
-    hashMutex.lock();
+    QMutexLocker locker(&hashMutex);
 
+    // sync access to fileList
     while (!fileList.empty())
     {
         if (cancel.load())
@@ -219,8 +218,9 @@ void DDProgressWindow::run()
 
         auto file = fileList.takeFirst();
 
-        hashMutex.unlock();
+        locker.unlock();
 
+        // async hash calculation
         if (file.exists() && !file.isDir())
         {
             QString absPath = file.absoluteFilePath();
@@ -229,13 +229,13 @@ void DDProgressWindow::run()
             {
                 if (f.open(QIODevice::ReadOnly))
                 {
-                    // it would be better to use Sha1 instead of Md5, but Md5 is a bit faster.
                     QCryptographicHash hasher(QCryptographicHash::Sha1);
                     hasher.addData(&f);
                     QString sHash(hasher.result().toHex());
 
-                    hashMutex.lock();
+                    locker.relock();
 
+                    // sync access to fileHashMap
                     fileHashMap.insert(sHash, file.absoluteFilePath());
                     uint filesForHash = fileHashMap.values(sHash).size();
                     if (filesForHash == 2)
@@ -248,8 +248,6 @@ void DDProgressWindow::run()
                         duplicatesCount++;
                     }
 
-                    hashMutex.unlock();
-
                     f.close();
                 }
             }
@@ -260,13 +258,12 @@ void DDProgressWindow::run()
             }
         }
 
+        // sync access to fileList in a loop
+        locker.relock();
+
         progress = progress + progressStep;
         QMetaObject::invokeMethod(this, "UpdateUI", Qt::QueuedConnection);
-
-        hashMutex.lock();
     }
-
-    hashMutex.unlock();
 }
 
 //////////////////////////////////////////////////////////////////

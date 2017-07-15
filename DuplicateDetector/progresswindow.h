@@ -55,7 +55,7 @@ private slots:
     void UpdateUI();
 
 private:
-    void Run();
+    void RunSearch();
     void Cancel();
 
 private:
