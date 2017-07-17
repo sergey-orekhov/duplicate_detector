@@ -91,41 +91,41 @@ void DDProgressWindow::RunSearch()
     }
 
     // filter files by size
-    QMultiMap<qint64, QFileInfo> fileSizeMap;
+    QMultiMap<qint64, QFileInfo> sizeFileMap;
     for (auto file: fileSet)
     {
         RETURN_IF_CANCELED;
 
-        fileSizeMap.insert(file.size(), file);
+        sizeFileMap.insert(file.size(), file);
     }
 
     fileSet.clear();
 
-    // remove unique items from fileSizeMap
-    for (auto key: fileSizeMap.uniqueKeys())
+    // remove unique items from sizeFileMap
+    for (auto key: sizeFileMap.uniqueKeys())
     {
         RETURN_IF_CANCELED;
 
-        if (fileSizeMap.values(key).size() <= 1)
+        if (sizeFileMap.values(key).size() <= 1)
         {
-            fileSizeMap.remove(key);
+            sizeFileMap.remove(key);
         }
     }
 
-    if (fileSizeMap.empty())
+    if (sizeFileMap.empty())
     {
         DONE;
     }
 
     // filter files by content (some first bytes)
-    QMultiMap<QString, QFileInfo> fileContentMap;
-    uint readBytes = fileSizeMap.firstKey();
+    QMultiMap<QString, QFileInfo> contentFileMap;
+    uint readBytes = sizeFileMap.firstKey();
     if (readBytes > MAX_READ_SIZE)
     {
         readBytes = MAX_READ_SIZE;
     }
 
-    for(auto file: fileSizeMap.values())
+    for(auto file: sizeFileMap.values())
     {
         RETURN_IF_CANCELED;
 
@@ -136,35 +136,35 @@ void DDProgressWindow::RunSearch()
             if (f.open(QIODevice::ReadOnly))
             {
                 QString key(f.read(readBytes).toHex());
-                fileContentMap.insert(key, file);
+                contentFileMap.insert(key, file);
                 f.close();
             }
         }
     }
 
-    fileSizeMap.clear();
+    sizeFileMap.clear();
 
-    // remove unique items from fileContentMap
-    for (auto key: fileContentMap.uniqueKeys())
+    // remove unique items from contentFileMap
+    for (auto key: contentFileMap.uniqueKeys())
     {
         RETURN_IF_CANCELED;
 
-        if (fileContentMap.values(key).size() <= 1)
+        if (contentFileMap.values(key).size() <= 1)
         {
-            fileContentMap.remove(key);
+            contentFileMap.remove(key);
         }
     }
 
-    if (fileContentMap.empty())
+    if (contentFileMap.empty())
     {
         DONE;
     }
 
-    fileList = fileContentMap.values();
-    fileContentMap.clear();
+    fileList = contentFileMap.values();
+    contentFileMap.clear();
 
     // filter by hash
-    fileHashMap.clear();
+    hashFileMap.clear();
     progress = 0.0f;
     progressStep = 100.0f / fileList.size();
     duplicatesCount = 0;
@@ -182,21 +182,21 @@ void DDProgressWindow::RunSearch()
 
     fileList.clear();
 
-    // remove unique items from fileHashMap
-    for (auto key: fileHashMap.uniqueKeys())
+    // remove unique items from hashFileMap
+    for (auto key: hashFileMap.uniqueKeys())
     {
         RETURN_IF_CANCELED;
 
-        if (fileHashMap.values(key).size() <= 1)
+        if (hashFileMap.values(key).size() <= 1)
         {
-            fileHashMap.remove(key);
+            hashFileMap.remove(key);
         }
     }
 
-    for (auto key: fileHashMap.uniqueKeys())
+    for (auto key: hashFileMap.uniqueKeys())
     {
         RETURN_IF_CANCELED;
-        duplicates.append(fileHashMap.values(key));
+        duplicates.append(hashFileMap.values(key));
     }
 
     DONE;
@@ -235,9 +235,9 @@ void DDProgressWindow::run()
 
                     locker.relock();
 
-                    // sync access to fileHashMap
-                    fileHashMap.insert(sHash, file.absoluteFilePath());
-                    uint filesForHash = fileHashMap.values(sHash).size();
+                    // sync access to hashFileMap
+                    hashFileMap.insert(sHash, file.absoluteFilePath());
+                    uint filesForHash = hashFileMap.values(sHash).size();
                     if (filesForHash == 2)
                     {
                         // at least two new duplicates found

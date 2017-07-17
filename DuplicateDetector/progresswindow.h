@@ -69,7 +69,7 @@ private:
     std::atomic_bool cancel;
 
     QList<QFileInfo> fileList;
-    QMultiMap<QString, QString> fileHashMap;
+    QMultiMap<QString, QString> hashFileMap;
 
     QThreadPool* thPool;
     std::atomic<float> progress = 0.0f;
